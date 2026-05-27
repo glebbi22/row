@@ -465,6 +465,82 @@ main {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.08); border-radius: 999px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.15); }
+
+/* ====== HABITS SECTION ====== */
+.habits-section { margin-top: 32px; }
+
+.habit-item {
+  display: grid;
+  grid-template-columns: 32px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  margin-bottom: 6px;
+  border: 1px solid transparent;
+  transition: background 0.2s;
+}
+.habit-item.done { background: rgba(29, 158, 117, 0.08); }
+
+.habit-body { min-width: 0; }
+.habit-name {
+  font-size: 14px; font-weight: 600;
+  color: var(--text-primary); line-height: 1.2;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.habit-item.done .habit-name { text-decoration: line-through; color: var(--text-tertiary); }
+
+.habit-right {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+}
+.habit-streak {
+  display: flex; align-items: center; gap: 3px;
+  font-family: var(--font-mono); font-size: 12px; font-weight: 700;
+  white-space: nowrap; min-width: 28px; justify-content: flex-end;
+}
+.habit-streak-val { color: var(--text-secondary); }
+
+.habit-counter { display: flex; align-items: center; gap: 5px; }
+.habit-counter-btn {
+  width: 26px; height: 26px; border-radius: 7px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-card); color: var(--text-secondary);
+  font-size: 15px; font-weight: 700; line-height: 1;
+  cursor: pointer; padding: 0; font-family: inherit;
+  display: flex; align-items: center; justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s;
+}
+.habit-counter-btn:hover { background: rgba(255, 255, 255, 0.08); }
+.habit-counter-val {
+  font-family: var(--font-mono); font-size: 12px; font-weight: 700;
+  color: var(--text-primary); min-width: 30px; text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.habit-pages-wrap { display: flex; align-items: center; gap: 4px; }
+.habit-pages-input {
+  width: 52px; font-size: 13px; padding: 4px 7px;
+  border-radius: 8px; border: 1px solid var(--border-strong);
+  background: var(--bg-input); color: var(--text-primary);
+  font-family: var(--font-mono); text-align: center;
+  font-variant-numeric: tabular-nums; -moz-appearance: textfield;
+}
+.habit-pages-input::-webkit-inner-spin-button,
+.habit-pages-input::-webkit-outer-spin-button { -webkit-appearance: none; }
+.habit-pages-input:focus {
+  outline: none; border-color: rgba(255, 255, 255, 0.4);
+  background: var(--bg-input-focus);
+}
+.habit-pages-label {
+  font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono);
+}
+
+@media (max-width: 600px) {
+  .habit-counter-val { min-width: 24px; }
+  .habit-pages-input { width: 46px; }
+}
 </style>
 </head>
 <body>
@@ -511,6 +587,20 @@ main {
       </div>
     </div>
   </div>
+
+  <section class="habits-section">
+    <div class="section-title">Habits</div>
+    <div class="stack-card">
+      <div class="stack-head">
+        <div class="sf-title">Tap to check off</div>
+        <div class="stack-progress-text" id="habitsProgressText">0 / 8 erledigt heute · Reset um 6:00 Uhr</div>
+      </div>
+      <div class="stack-progress-track">
+        <div id="habitsProgressBar" class="stack-progress-fill"></div>
+      </div>
+      <div id="habitsList"></div>
+    </div>
+  </section>
 
   <section id="water" class="water-embed">
     <div class="section-title">Water Tracker</div>
@@ -1035,12 +1125,191 @@ main {
   startTicker();
 })();
 </script>
+
+<script>
+/* ====== HABITS ====== */
+(() => {
+  'use strict';
+
+  const HABITS_KEY = 'habits:v1';
+
+  const HABITS = [
+    { id: 'nofap',       name: 'No Fap',              type: 'check',   icon: '🔥' },
+    { id: 'meditation',  name: 'Meditation 10 Min',    type: 'check',   icon: '🧘' },
+    { id: 'phone',       name: 'Kein Handy am Morgen', type: 'check',   icon: '📵' },
+    { id: 'creatine',    name: 'Creatine',             type: 'check',   icon: '💊' },
+    { id: 'protein',     name: 'Protein 130g',         type: 'check',   icon: '🥩' },
+    { id: 'affirmation', name: 'Affirmation',          type: 'check',   icon: '✨' },
+    { id: 'buch',        name: 'Buch lesen',           type: 'pages',   icon: '📚' },
+    { id: 'wasser',      name: 'Wasser',               type: 'counter', icon: '💧', goal: 8 },
+  ];
+
+  function getActiveDate() {
+    const now = new Date();
+    if (now.getHours() < 6) now.setDate(now.getDate() - 1);
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  function dateOffsetStr(daysAgo) {
+    const now = new Date();
+    if (now.getHours() < 6) now.setDate(now.getDate() - 1);
+    now.setDate(now.getDate() - daysAgo);
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  function getState() {
+    try { return JSON.parse(localStorage.getItem(HABITS_KEY)) || { logs: {} }; }
+    catch (e) { return { logs: {} }; }
+  }
+  function setState(s) { localStorage.setItem(HABITS_KEY, JSON.stringify(s)); }
+  function todayLog() { return getState().logs[getActiveDate()] || {}; }
+
+  function setTodayVal(id, val) {
+    const s = getState();
+    const today = getActiveDate();
+    if (!s.logs[today]) s.logs[today] = {};
+    if (val === null || val === undefined || val === false || val === 0) {
+      delete s.logs[today][id];
+    } else {
+      s.logs[today][id] = val;
+    }
+    // Prune logs older than 100 days
+    const cutoff = dateOffsetStr(100);
+    Object.keys(s.logs).forEach(k => { if (k < cutoff) delete s.logs[k]; });
+    setState(s);
+    render();
+  }
+
+  function isDone(habit, log) {
+    const v = log[habit.id];
+    if (habit.type === 'check')   return v === true;
+    if (habit.type === 'counter') return (v || 0) >= (habit.goal || 1);
+    if (habit.type === 'pages')   return (v || 0) > 0;
+    return false;
+  }
+
+  function getStreak(habit) {
+    const s = getState();
+    const todayKey = getActiveDate();
+    const todayDone = isDone(habit, s.logs[todayKey] || {});
+    let streak = 0;
+    const start = todayDone ? 0 : 1;
+    for (let i = start; i < 365; i++) {
+      if (isDone(habit, s.logs[dateOffsetStr(i)] || {})) streak++;
+      else break;
+    }
+    return streak;
+  }
+
+  function render() {
+    const log = todayLog();
+    const doneCount = HABITS.filter(h => isDone(h, log)).length;
+    const total = HABITS.length;
+
+    document.getElementById('habitsProgressText').textContent =
+      `${doneCount} / ${total} erledigt heute · Reset um 6:00 Uhr`;
+    document.getElementById('habitsProgressBar').style.width =
+      (total ? (doneCount / total) * 100 : 0) + '%';
+
+    const list = document.getElementById('habitsList');
+    list.innerHTML = '';
+
+    HABITS.forEach(habit => {
+      const done = isDone(habit, log);
+      const streak = getStreak(habit);
+      const val = log[habit.id] || 0;
+
+      const streakHtml = streak > 0
+        ? `<div class="habit-streak">🔥<span class="habit-streak-val">${streak}</span></div>`
+        : `<div class="habit-streak"><span class="habit-streak-val" style="color:var(--text-quaternary)">—</span></div>`;
+
+      let rightHtml = '';
+      if (habit.type === 'counter') {
+        rightHtml = `
+          <div class="habit-right">
+            <div class="habit-counter">
+              <button class="habit-counter-btn" data-action="dec" data-id="${habit.id}" type="button">−</button>
+              <span class="habit-counter-val">${val}/${habit.goal}</span>
+              <button class="habit-counter-btn" data-action="inc" data-id="${habit.id}" type="button">+</button>
+            </div>
+            ${streakHtml}
+          </div>`;
+      } else if (habit.type === 'pages') {
+        rightHtml = `
+          <div class="habit-right">
+            <div class="habit-pages-wrap">
+              <input class="habit-pages-input" type="number" min="0" placeholder="0"
+                value="${val > 0 ? val : ''}" data-id="${habit.id}" aria-label="Seiten">
+              <span class="habit-pages-label">S.</span>
+            </div>
+            ${streakHtml}
+          </div>`;
+      } else {
+        rightHtml = streakHtml;
+      }
+
+      const item = document.createElement('div');
+      item.className = 'habit-item' + (done ? ' done' : '');
+      item.innerHTML = `
+        <button class="stack-check ${done ? 'checked' : ''}"
+          data-action="toggle" data-id="${habit.id}"
+          aria-label="Abhaken" type="button">${done ? '✓' : ''}</button>
+        <div class="habit-body">
+          <div class="habit-name">${habit.icon} ${habit.name}</div>
+        </div>
+        ${rightHtml}`;
+      list.appendChild(item);
+    });
+  }
+
+  // Event delegation — wired once, survives re-renders
+  const list = document.getElementById('habitsList');
+
+  list.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    e.stopPropagation();
+    const id = btn.dataset.id;
+    const habit = HABITS.find(h => h.id === id);
+    if (!habit) return;
+
+    if (btn.dataset.action === 'toggle' && habit.type === 'check') {
+      const l = todayLog();
+      setTodayVal(id, l[id] ? null : true);
+    } else if (btn.dataset.action === 'inc') {
+      const l = todayLog();
+      setTodayVal(id, Math.min((l[id] || 0) + 1, (habit.goal || 1) * 2));
+    } else if (btn.dataset.action === 'dec') {
+      const l = todayLog();
+      setTodayVal(id, Math.max(0, (l[id] || 0) - 1));
+    }
+  });
+
+  list.addEventListener('change', (e) => {
+    const input = e.target.closest('.habit-pages-input');
+    if (!input) return;
+    const v = parseInt(input.value, 10);
+    setTodayVal(input.dataset.id, isNaN(v) || v <= 0 ? null : v);
+  });
+
+  window.addEventListener('storage', render);
+  setInterval(render, 60 * 1000);
+  render();
+})();
+</script>
+
 <script>
 document.addEventListener('DOMContentLoaded', function () {
   if (typeof initCloudSync !== 'function') return;
   initCloudSync({
     appKey: 'health',
-    syncedKeys: ['stack:items', 'stack:version', 'stack:low', 'po_water_v1'],
+    syncedKeys: ['stack:items', 'stack:version', 'stack:low', 'po_water_v1', 'habits:v1'],
     syncedPrefixes: ['stack:taken:'],
     onApplied: function () { window.dispatchEvent(new Event('storage')); }
   });
