@@ -83,21 +83,42 @@ main {
 }
 .section-title::before { content: '≡'; font-size: 14px; opacity: 0.5; }
 
-.water-embed { margin-top: 56px; }
-.water-iframe {
-  display: block;
-  width: 100%;
-  height: 880px;
-  border: 0;
-  background: transparent;
-  border-radius: 16px;
+/* ── Edit-Yesterday modal ──────────────────────────────── */
+.habit-yday-btn {
+  display: block; margin: 12px auto 0;
+  background: none; border: 1px solid rgba(255,255,255,0.10);
+  color: var(--text-secondary); border-radius: 8px;
+  padding: 7px 16px; font-size: 12px; font-family: inherit;
+  cursor: pointer; letter-spacing: 0.04em; transition: background 0.15s, color 0.15s;
+}
+.habit-yday-btn:hover { background: rgba(255,255,255,0.06); color: var(--text); }
+
+.habit-modal-overlay {
+  position: fixed; inset: 0; z-index: 9998;
+  background: rgba(0,0,0,0.72);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.habit-modal-box {
+  background: var(--surface); border-radius: 16px;
+  width: min(400px, 100%);
+  box-shadow: 0 8px 40px rgba(0,0,0,0.6);
   overflow: hidden;
-  color-scheme: dark;
 }
-@media (max-width: 480px) {
-  .water-embed { margin-top: 40px; }
-  .water-iframe { height: 780px; }
+.habit-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
 }
+.habit-modal-title { font-size: 14px; font-weight: 700; }
+.habit-modal-date  { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+.habit-modal-close {
+  background: none; border: none; color: var(--text-secondary);
+  font-size: 20px; cursor: pointer; line-height: 1; padding: 0 2px;
+  transition: color 0.15s;
+}
+.habit-modal-close:hover { color: var(--text); }
+.habit-modal-list { padding: 8px 0 4px; max-height: 60vh; overflow-y: auto; }
 
 .stack-card {
   background: var(--bg-card);
@@ -940,11 +961,7 @@ main {
       </div>
       <div id="habitsList"></div>
     </div>
-  </section>
-
-  <section id="water" class="water-embed">
-    <div class="section-title">Water Tracker</div>
-    <iframe src="po-water.html" class="water-iframe" loading="lazy" title="Water Tracker"></iframe>
+    <button class="habit-yday-btn" id="habitYdayBtn" type="button">Edit Yesterday</button>
   </section>
 
   <div class="attribution">// editable template · all data stays in your browser</div>
@@ -1628,6 +1645,75 @@ main {
   window.addEventListener('storage', render);
   setInterval(render, 60 * 1000);
   render();
+
+  // ---- Edit Yesterday modal ----
+  function ydayDateStr()    { return dateOffsetStr(1); }   // for check habits
+  function ydayGymDateStr() { return gymDateStr(1); }       // for gym habit
+
+  function getYdayDone(habit) {
+    if (habit.type === 'gym') return !!getGymDone()[ydayGymDateStr()];
+    return (getState().logs[ydayDateStr()] || {})[habit.id] === true;
+  }
+
+  function toggleYday(habit) {
+    if (habit.type === 'gym') {
+      const done = getGymDone();
+      const key  = ydayGymDateStr();
+      if (done[key]) delete done[key]; else done[key] = new Date().toISOString();
+      localStorage.setItem(GYM_DONE_KEY, JSON.stringify(done));
+    } else {
+      const s    = getState();
+      const ykey = ydayDateStr();
+      if (!s.logs[ykey]) s.logs[ykey] = {};
+      if (s.logs[ykey][habit.id]) delete s.logs[ykey][habit.id];
+      else s.logs[ykey][habit.id] = true;
+      setState(s);
+    }
+    renderYdayModal();
+    render();
+  }
+
+  function fmtYdayLabel() {
+    const d = new Date();
+    if (d.getHours() < 6) d.setDate(d.getDate() - 2); else d.setDate(d.getDate() - 1);
+    return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  }
+
+  function renderYdayModal() {
+    const listEl = document.getElementById('habitYdayList');
+    listEl.innerHTML = '';
+    HABITS.forEach(habit => {
+      const done = getYdayDone(habit);
+      const row  = document.createElement('div');
+      row.className = 'habit-item' + (done ? ' done' : '');
+      row.style.cssText = 'padding: 10px 18px; cursor: pointer;';
+      row.innerHTML = `
+        <button class="stack-check ${done ? 'checked' : ''}"
+          type="button" style="pointer-events:none">${done ? '✓' : ''}</button>
+        <div class="habit-body">
+          <div class="habit-name">
+            <span class="habit-name-text">${habit.icon} ${habit.name}</span>
+          </div>
+        </div>`;
+      row.addEventListener('click', () => toggleYday(habit));
+      listEl.appendChild(row);
+    });
+  }
+
+  function openYdayModal() {
+    document.getElementById('habitYdayDateLabel').textContent = fmtYdayLabel();
+    renderYdayModal();
+    document.getElementById('habitYdayModal').style.display = 'flex';
+  }
+  function closeYdayModal() {
+    document.getElementById('habitYdayModal').style.display = 'none';
+  }
+
+  document.getElementById('habitYdayBtn').addEventListener('click', openYdayModal);
+  document.getElementById('habitYdayCloseBtn').addEventListener('click', closeYdayModal);
+  document.getElementById('habitYdayModal').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeYdayModal();
+  });
 })();
 </script>
 
@@ -1636,7 +1722,7 @@ document.addEventListener('DOMContentLoaded', function () {
   if (typeof initCloudSync !== 'function') return;
   initCloudSync({
     appKey: 'health',
-    syncedKeys: ['stack:items', 'stack:version', 'stack:low', 'po_water_v1', 'habits:v1'],
+    syncedKeys: ['stack:items', 'stack:version', 'stack:low', 'habits:v1'],
     syncedPrefixes: ['stack:taken:'],
     onApplied: function () { window.dispatchEvent(new Event('storage')); }
   });
@@ -1662,6 +1748,20 @@ document.addEventListener('DOMContentLoaded', function () {
   </div>
 </div>
 
+
+<!-- Edit Yesterday modal -->
+<div class="habit-modal-overlay" id="habitYdayModal" style="display:none">
+  <div class="habit-modal-box">
+    <div class="habit-modal-header">
+      <div>
+        <div class="habit-modal-title">Edit Yesterday</div>
+        <div class="habit-modal-date" id="habitYdayDateLabel"></div>
+      </div>
+      <button class="habit-modal-close" id="habitYdayCloseBtn" type="button">×</button>
+    </div>
+    <div id="habitYdayList" class="habit-modal-list"></div>
+  </div>
+</div>
 
 </body>
 </html>

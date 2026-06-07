@@ -700,8 +700,12 @@ body::after {
   // Paste your Anthropic key here to enable ✨ Polish. Empty = falls back to plain add.
   const ANTHROPIC_API_KEY = '';
 
-  const WAKE_HOUR  = 8;
-  const SLEEP_HOUR = 24;
+  // Weekdays 6:30 AM–10 PM, weekends 8 AM–10 PM
+  function getDaySchedule() {
+    const day = new Date().getDay(); // 0=Sun, 6=Sat
+    const isWeekend = (day === 0 || day === 6);
+    return { wakeHour: isWeekend ? 8 : 6.5, sleepHour: 22 };
+  }
 
   // ---------- storage helpers ----------
   function storeGet(key) {
@@ -728,7 +732,8 @@ body::after {
   function dateToKey(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
   function getActiveDateString() {
     const now = new Date();
-    if (now.getHours() < 6) {
+    const { wakeHour } = getDaySchedule();
+    if (now.getHours() + now.getMinutes() / 60 < wakeHour) {
       const d = new Date(now);
       d.setDate(d.getDate() - 1);
       return dateToKey(d);
@@ -757,6 +762,28 @@ body::after {
     return Array.isArray(g) ? g : [];
   }
   function setGoals(key, list) { storeSet(key, list); }
+
+  // ---------- evening pre-stage: copy uncompleted to tomorrow at 22:00 ----------
+  function eveningRollover() {
+    const now = new Date();
+    if (now.getHours() < 22) return;
+    const todayStr = dateToKey(now);
+    const STAGE_KEY = 'goals:evening_staged';
+    if (storeGet(STAGE_KEY) === todayStr) return; // already staged today
+    const todayGoals = getGoals('goals:' + todayStr);
+    const uncompleted = todayGoals.filter(g => !g.done && g.text);
+    storeSet(STAGE_KEY, todayStr); // mark done even if nothing to stage
+    if (uncompleted.length === 0) return;
+    const tmr = new Date(now);
+    tmr.setDate(tmr.getDate() + 1);
+    const tomorrowStr = dateToKey(tmr);
+    const tomorrowGoals = getGoals('goals:' + tomorrowStr);
+    const seen = new Set(tomorrowGoals.map(g => g.text));
+    uncompleted.forEach(g => {
+      if (!seen.has(g.text)) { tomorrowGoals.push({ text: g.text, done: false }); seen.add(g.text); }
+    });
+    setGoals('goals:' + tomorrowStr, tomorrowGoals);
+  }
 
   // ---------- rollover: pull undone older goals into today ----------
   function rollover() {
@@ -922,6 +949,7 @@ body::after {
   function updateDayRing() {
     const now = new Date();
     const hours = now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600;
+    const { wakeHour: WAKE_HOUR, sleepHour: SLEEP_HOUR } = getDaySchedule();
     const percentEl   = document.getElementById('dayRingPercent');
     const phaseEl     = document.getElementById('dayRingPhase');
     const clockEl     = document.getElementById('dayRingClock');
@@ -1292,6 +1320,7 @@ body::after {
   );
 
   // ---------- Boot ----------
+  eveningRollover();
   rollover();
   processStreak();
   loadToday();
@@ -1299,6 +1328,7 @@ body::after {
   renderStreak();
   updateDayRing();
   setInterval(updateDayRing, 60 * 1000);
+  setInterval(() => { eveningRollover(); loadTomorrow(); }, 60 * 1000);
   startTicker();
 
   // Re-render when storage changes from another tab (or our bridged parent).
